@@ -1,0 +1,5 @@
+# Python/Django
+__pycache__/
+*.pyc
+.venv/
+.idea/
