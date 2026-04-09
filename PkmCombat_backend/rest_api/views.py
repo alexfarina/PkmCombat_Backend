@@ -43,3 +43,28 @@ def register(request):
     User.objects.create(name=json_name, email= json_email, encrypted_pass=salted_and_hashed_pass)
 
     return JsonResponse({"registered": True, "token": radom_token}, status=201)
+
+
+@csrf_exempt
+def login(request):
+    if request.method!="POST":
+        return JsonResponse({"error":"HTTP method unsupportable"}, status=405)
+    try:
+        body_json=json.loads(request.body)
+
+        json_name=body_json["name"]
+        json_password=body_json["encrypted_pass"]
+    except KeyError:
+        return JsonResponse({"error":"Missing body json parameter"}, status=400)
+
+    try:
+        db_user = User.objects.get(name=json_name)
+    except User.DoesNotExist:
+        return JsonResponse({"error":"User not found"}, status=401)
+
+    if bcrypt.checkpw(json_password.encode('utf8'), db_user.encrypted_pass.encode('utf8')):
+        random_token=secrets.token_hex(10)
+        db_user.token_sesion=random_token
+        db_user.save()
+        return JsonResponse({"token":random_token, "user": db_user.name, "email": db_user.email}, status=200)
+    return JsonResponse({"error":"Incorrect password"}, status=401)
