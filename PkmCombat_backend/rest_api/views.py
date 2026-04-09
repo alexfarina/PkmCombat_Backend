@@ -1,3 +1,4 @@
+import requests
 from django.shortcuts import render
 
 # Create your views here.
@@ -68,3 +69,72 @@ def login(request):
         db_user.save()
         return JsonResponse({"token":random_token, "user": db_user.name, "email": db_user.email}, status=200)
     return JsonResponse({"error":"Incorrect password"}, status=401)
+
+
+def select_pokemon(request):
+    if request.method!="GET":
+        return JsonResponse({"error":"HTTP method unsupportable"}, status=405)
+
+    name=request.GET.get("name")
+    lvl = int(request.GET.get("lvl") or 50)
+    nature = request.GET.get("nature", "serious")
+    if not nature:
+        nature = "serious"
+    #if nature not in NATURES:
+        #return JsonResponse({"error": "Invalid nature"}, status=400)
+
+    ev_hp = int(request.GET.get("ev_hp") or 0)
+    ev_att = int(request.GET.get("ev_att") or 0)
+    ev_att_esp = int(request.GET.get("ev_att_esp") or 0)
+    ev_def = int(request.GET.get("ev_def") or 0)
+    ev_def_esp = int(request.GET.get("ev_def_esp") or 0)
+    ev_speed = int(request.GET.get("ev_speed") or 0)
+
+
+    if name:
+        url= f"https://pokeapi.co/api/v2/pokemon/{name.lower()}"
+
+        try:
+            response = requests.get(url)
+
+            if response.status_code == 200:
+                data = response.json()
+                name=data.get("name")
+                cries=data.get("cries",{}).get("latest")
+                front_sprite=data.get("sprites",{}).get("front_default")
+                back_sprite=data.get("sprites").get("back_default")
+                types = data.get("types", [])
+                first_type = types[0].get("type").get("name") if len(types) > 0 else None
+                second_type = types[1].get("type").get("name") if len(types) > 1 else None
+
+                stats=data.get("stats",[])
+                hp=stats[0].get("base_stat") if len(stats)>0 else None
+                attack=stats[1].get("base_stat") if len(stats)>1 else None
+                defense=stats[2].get("base_stat") if len(stats)>2 else None
+                spe_att=stats[3].get("base_stat") if len(stats)>3 else None
+                spe_def=stats[4].get("base_stat") if len(stats)>4 else None
+                speed=stats[5].get("base_stat") if len(stats)>5 else None
+
+                #aplicar_naturaleza(nature, attack, defense, spe_att, spe_def, speed)
+
+                pkm_stats={"hp": hp,
+                       "att":attack,
+                       "def": defense,
+                       "spe_att":spe_att,
+                       "spe_def":spe_def,
+                       "speed": speed}
+
+                json = {"name": name,
+                        "crie": cries,
+                        "front_sprite":front_sprite,
+                        "back_sprite":back_sprite,
+                        "first_tpye": first_type,
+                        "second_type": second_type,
+                        "pkm_stats": pkm_stats
+                      }
+                return JsonResponse(json, status=200)
+            else:
+                return JsonResponse({"error": "Pokemon not found"}, status=404)
+
+        except requests.exceptions.RequestException as e:
+            return JsonResponse({"error": "Connection error"}, status=500)
