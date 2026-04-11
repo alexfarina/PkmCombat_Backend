@@ -42,7 +42,7 @@ def register(request):
     ).decode("utf8")
     radom_token= secrets.token_hex(10)
 
-    User.objects.create(name=json_name, email= json_email, encrypted_pass=salted_and_hashed_pass)
+    User.objects.create(name=json_name, email= json_email, encrypted_pass=salted_and_hashed_pass, token_sesion=radom_token)
 
     return JsonResponse({"registered": True, "token": radom_token}, status=201)
 
@@ -71,10 +71,24 @@ def login(request):
         return JsonResponse({"token":random_token, "user": db_user.name, "email": db_user.email}, status=200)
     return JsonResponse({"error":"Incorrect password"}, status=401)
 
+def __get_request_user(request):
+    header_token=request.headers.get("Session", None)
+    if not header_token:
+        return None
+    else:
+        try:
+            return  User.objects.get(token_sesion=header_token)
+        except User.DoesNotExist:
+            return  None
 
+@csrf_exempt
 def update_pokemon(request, team_id, slot):
-    if request.method!="GET":
+    if request.method!="PUT":
         return JsonResponse({"error":"HTTP method unsupportable"}, status=405)
+
+    authenticated_user = __get_request_user(request)
+    if authenticated_user is None:
+        return JsonResponse({"error": "Unauthorized: Missing or invalid token"}, status=401)
 
     name = (request.GET.get("name") or "").lower().strip()
 
@@ -147,27 +161,39 @@ def update_pokemon(request, team_id, slot):
                 spe_def=((2 * spe_def + iv + (ev_def_esp // 4)) * lvl // 100) + 5
                 speed=((2 * speed + iv + (ev_speed // 4)) * lvl // 100) + 5
 
-                attack, defense, spe_att, spe_def, speed = aplicar_naturaleza(nature, attack, defense, spe_att, spe_def, speed)
+                attack, defense, spe_att, spe_def, speed = apply_nature(nature, attack, defense, spe_att, spe_def, speed)
 
+                stats_obj = PkmStats.objects.create(
+                    hp=hp, att_fis=attack, def_fis=defense,
+                    att_esp=spe_att, def_esp=spe_def, speed=speed
+                )
 
-                pkm_stats={"hp": hp,
-                       "att":attack,
-                       "def": defense,
-                       "spe_att":spe_att,
-                       "spe_def":spe_def,
-                       "speed": speed}
+                bd_pkm = Pokemon.objects.create(
+                    name=name,
+                    sound=cries,
+                    front_sprite=front_sprite,
+                    back_sprite=back_sprite,
+                    lvl=lvl,
+                    first_type=first_type,
+                    second_type=second_type,
+                    pkm_stats=stats_obj
+                )
+                try:
+                    team = Team.objects.get(user=authenticated_user,id=team_id, slot=slot)
+                    if team.pokemon:
+                        team.pokemon.delete()
+                    team.pokemon = bd_pkm
+                    team.save()
 
-                pkm_json = {"name": name,
-                            "lvl":lvl,
-                        "crie": cries,
-                        "front_sprite":front_sprite,
-                        "back_sprite":back_sprite,
-                        "first_tpye": first_type,
-                        "second_type": second_type,
-                        "pkm_stats": pkm_stats,
-                        "learned-moves": learnable_moves
-                      }
-                return JsonResponse(pkm_json, status=200)
+                    return JsonResponse({"OK": "created"}, status=200)
+                except Team.DoesNotExist:
+                    Team.objects.create(
+                        user=authenticated_user,
+                        slot=slot,
+                        pokemon=bd_pkm
+                    )
+                return JsonResponse({"OK":"created"}, status=201)
+
             else:
                 return JsonResponse({"error": "Pokemon not found"}, status=404)
 
@@ -175,7 +201,7 @@ def update_pokemon(request, team_id, slot):
             return JsonResponse({"error": "Connection error"}, status=500)
 
 
-def aplicar_naturaleza(nature, attack, defense, spe_att, spe_def, speed):
+def apply_nature(nature, attack, defense, spe_att, spe_def, speed):
     natures = NATURES.get(nature.lower(), {})
     if "up_att" in natures : attack *= natures.get("up_att")
     if "up_def" in natures : defense *= natures.get("up_def")

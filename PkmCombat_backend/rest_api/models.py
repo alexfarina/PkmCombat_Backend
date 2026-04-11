@@ -6,6 +6,7 @@ class User(models.Model):
     email = models.EmailField(max_length=150)
     encrypted_pass = models.CharField(max_length=300)
     online = models.BooleanField(default=False)
+    token_sesion = models.CharField(unique=True, max_length=100)
 
 
 class Moves(models.Model):
@@ -23,13 +24,13 @@ class PkmStats(models.Model):
     att_esp = models.IntegerField(null=True, blank=True)
     att_fis = models.IntegerField(null=True, blank=True)
     speed = models.IntegerField(null=True, blank=True)
-    ev_limit = models.IntegerField(default=508)
 
 
 class Pokemon(models.Model):
     name = models.CharField(max_length=150)
-    sound = models.FileField(upload_to='sounds/', blank=True, null=True)
+    sound = models.URLField(blank=True, null=True)
     front_sprite = models.URLField(blank=True, null=True)
+    back_sprite = models.URLField(blank=True, null=True)
     lvl = models.IntegerField(default=1)
     first_type = models.CharField(max_length=150)
     second_type = models.CharField(max_length=150, blank=True, null=True)
