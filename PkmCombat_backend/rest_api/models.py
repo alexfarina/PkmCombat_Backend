@@ -44,8 +44,11 @@ class PkmMoves(models.Model):
 
 class Team(models.Model):
     user = models.ForeignKey('User', on_delete=models.CASCADE)
+
+class TeamMember(models.Model):
+    team = models.ForeignKey(Team, related_name='members', on_delete=models.CASCADE)
     slot = models.IntegerField()
-    pokemon = models.ForeignKey('Pokemon', on_delete=models.SET_NULL, null=True, blank=True)
+    pokemon = models.ForeignKey('Pokemon', null=True, blank=True, on_delete=models.SET_NULL)
 
 
 class Battle(models.Model):
