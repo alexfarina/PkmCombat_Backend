@@ -22,5 +22,5 @@ urlpatterns = [
     path('admin/', admin.site.urls),
     path('register/', views.register),
     path('login/', views.login),
-    path('team/<int:team_id>/update_pokemon/<int:slot>/', views.update_pokemon)
+    path('update_or_create_pokemon/<int:team_id>/<int:slot>/', views.update_or_create_pokemon),
 ]
