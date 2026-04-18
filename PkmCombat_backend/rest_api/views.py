@@ -315,3 +315,18 @@ def update_or_create_move(request, team_id , slot):
     except Team.DoesNotExist:
         return JsonResponse({"error": "Team no does not exist or this slot dont have pkm"}, status=400)
     return JsonResponse({"OK": "Moves created"},status=201)
+
+
+@csrf_exempt
+def delete_team(request, team_id):
+    if request.method!="DELETE":
+        return JsonResponse({"error":"HTPP method unsupportable"}, status=405)
+    auth_user=__get_request_user(request)
+    if auth_user is None:
+        return JsonResponse({"error":"Invalid token"}, status=401)
+    try:
+        team_obj=Team.objects.get(id=team_id , user=auth_user)
+        team_obj.delete()
+    except Team.DoesNotExist:
+        return JsonResponse({"error": "The team you want to delete does not exist"}, status=404)
+    return JsonResponse({"ok":"Team deleted successfully"}, status=200)
