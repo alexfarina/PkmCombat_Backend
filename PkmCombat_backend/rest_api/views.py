@@ -8,7 +8,7 @@ import bcrypt
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from rest_api.constants import NATURES, POKEDEX_LIST
-from rest_api.models import User,Team,Battle,Moves,PkmMoves,PkmStats,Pokemon
+from rest_api.models import User,Team,Battle,Moves,PkmMoves,PkmStats,Pokemon , TeamMember , TurnBattle
 
 
 @csrf_exempt
@@ -162,7 +162,7 @@ def update_or_create_pokemon(request, team_id, slot):
                 spe_def=((2 * spe_def + iv + (ev_def_esp // 4)) * lvl // 100) + 5
                 speed=((2 * speed + iv + (ev_speed // 4)) * lvl // 100) + 5
 
-                attack, defense, spe_att, spe_def, speed = aplicar_naturaleza(nature, attack, defense, spe_att, spe_def, speed)
+                attack, defense, spe_att, spe_def, speed = apply_nature(nature, attack, defense, spe_att, spe_def, speed)
 
                 stats_obj = PkmStats.objects.create(
                     hp=hp, att_fis=attack, def_fis=defense,
@@ -200,7 +200,7 @@ def update_or_create_pokemon(request, team_id, slot):
             return JsonResponse({"error": "Connection error"}, status=500)
 
 
-def aplicar_naturaleza(nature, attack, defense, spe_att, spe_def, speed):
+def apply_nature(nature, attack, defense, spe_att, spe_def, speed):
     natures = NATURES.get(nature.lower(), {})
     if "up_att" in natures : attack *= natures.get("up_att")
     if "up_def" in natures : defense *= natures.get("up_def")
@@ -215,3 +215,103 @@ def aplicar_naturaleza(nature, attack, defense, spe_att, spe_def, speed):
     if "low_speed" in natures : speed *= natures.get("low_speed")
 
     return int(attack), int(defense), int(spe_att), int(spe_def), int(speed)
+
+
+def update_or_create_move(request, team_id , slot):
+    if request.method!="GET":
+        return JsonResponse({"error":"HTTP method unsupportable"}, status=405)
+
+    mov1_name = (request.GET.get("mov1") or "").lower().strip()
+    mov2_name = (request.GET.get("mov2") or "").lower().strip()
+    mov3_name = (request.GET.get("mov3") or "").lower().strip()
+    mov4_name = (request.GET.get("mov4") or "").lower().strip()
+
+
+    if not mov1_name  and  not mov2_name  and not mov3_name  and not mov4_name :
+        return JsonResponse({"error": "At a minimum, the pokemon must have a move"},status=400)
+
+    authenticated_user=__get_request_user(request)
+    if authenticated_user is None:
+        return JsonResponse({"error": "Unauthorized: Missing or invalid token"}, status=401)
+    try:
+        team=Team.objects.get(id=team_id, user=authenticated_user)#user=authenticated_user
+        try:
+            team_member=TeamMember.objects.get(team=team.id, slot=slot)
+        except TeamMember.DoesNotExist:
+            return JsonResponse({"error": "The slot where you want to add the moves doesn't have any Pokémon"}, status=404)
+        pk_name=team_member.pokemon.name
+        url = f"https://pokeapi.co/api/v2/pokemon/{pk_name}"
+        try:
+            response = requests.get(url)
+            if response.status_code == 200:
+                data = response.json()
+                learned_moves=[]
+                pkm_moves={"mov1": None,
+                           "mov2": None,
+                           "mov3": None,
+                           "mov4": None}
+                moves = data.get("moves", [])
+                for move in moves:
+                    move.get("move",{}).get("name")
+                    learned_moves.append(move.get("move").get("name"))
+
+                suggestion_mov1 = []
+                suggestion_mov2 = []
+                suggestion_mov3 = []
+                suggestion_mov4 = []
+
+                if mov1_name in learned_moves:
+                    pkm_moves["mov1"] = mov1_name
+                elif mov1_name:
+                    for l in learned_moves:
+                        if l.startswith(mov1_name):
+                            suggestion_mov1.append(l)
+
+                if mov2_name in learned_moves:
+                    pkm_moves["mov2"] = mov2_name
+                elif mov2_name:
+                    for l in learned_moves:
+                        if l.startswith(mov2_name):
+                            suggestion_mov2.append(l)
+
+                if mov3_name in learned_moves:
+                    pkm_moves["mov3"] = mov3_name
+                elif mov3_name:
+                    for l in learned_moves:
+                        if l.startswith(mov3_name):
+                            suggestion_mov3.append(l)
+
+                if mov4_name in learned_moves:
+                    pkm_moves["mov4"] = mov4_name
+                elif mov4_name:
+                    for l in learned_moves:
+                        if l.startswith(mov4_name):
+                            suggestion_mov4.append(l)
+
+                if suggestion_mov1 or suggestion_mov2 or suggestion_mov3 or suggestion_mov4:
+                    return JsonResponse({
+                        "suggestion_mov1": suggestion_mov1,
+                        "suggestion_mov2": suggestion_mov2,
+                        "suggestion_mov3": suggestion_mov3,
+                        "suggestion_mov4": suggestion_mov4
+                    }, status=200)
+
+                for requested_move in pkm_moves.values():
+                    if requested_move:
+                            try:
+                                move_obj = Moves.objects.get(name=requested_move)
+                                pkm_move=PkmMoves.objects.filter(pokemon=team_member.pokemon, move=move_obj).first()
+                                if pkm_move:
+                                    pkm_move.pokemon=team_member.pokemon
+                                    pkm_move.move=move_obj
+                                    pkm_move.save()
+                                else:
+                                    PkmMoves.objects.create(pokemon=team_member.pokemon, move=move_obj)
+
+                            except Moves.DoesNotExist:
+                                return JsonResponse({"error": f"The movement {requested_move} does not exist in BD"},status=400)
+        except requests.exceptions.RequestException as e:
+            return JsonResponse({"error": "Connection error"}, status=500)
+    except Team.DoesNotExist:
+        return JsonResponse({"error": "Team no does not exist or this slot dont have pkm"}, status=400)
+    return JsonResponse({"OK": "Moves created"},status=201)

@@ -23,4 +23,5 @@ urlpatterns = [
     path('register/', views.register),
     path('login/', views.login),
     path('update_or_create_pokemon/<int:team_id>/<int:slot>/', views.update_or_create_pokemon),
+    path('update_or_create_move/<int:team_id>/<int:slot>/', views.update_or_create_move),
 ]
