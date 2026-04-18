@@ -330,3 +330,21 @@ def delete_team(request, team_id):
     except Team.DoesNotExist:
         return JsonResponse({"error": "The team you want to delete does not exist"}, status=404)
     return JsonResponse({"ok":"Team deleted successfully"}, status=200)
+
+@csrf_exempt
+def delete_pkm_in_team(request, team_id, slot_id):
+    if request.method!="DELETE":
+        return JsonResponse({"error":"HTPP method unsupportable"}, status=405)
+    auth_user=__get_request_user(request)
+    if auth_user is None:
+        return JsonResponse({"error":"Invalid token"}, status=401)
+    try:
+        team_obj = Team.objects.get(id=team_id, user=auth_user)
+        team_member=TeamMember.objects.get(team=team_obj,slot=slot_id)
+        team_member.pokemon=None
+        team_member.save()
+        return JsonResponse({"ok": "Slot  delete successfully"}, status=200)
+    except Team.DoesNotExist:
+        return JsonResponse({"error": "The team does not exists"}, status=404)
+    except TeamMember.DoesNotExist:
+        return JsonResponse({"error": "Slot not found in this team"}, status=404)
