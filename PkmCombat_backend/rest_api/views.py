@@ -348,3 +348,36 @@ def delete_pkm_in_team(request, team_id, slot_id):
         return JsonResponse({"error": "The team does not exists"}, status=404)
     except TeamMember.DoesNotExist:
         return JsonResponse({"error": "Slot not found in this team"}, status=404)
+
+
+def get_all_teams(request):
+    if request.method != "GET":
+        return JsonResponse({"error": "HTTP method unsupported"}, status=405)
+
+    auth_user = __get_request_user(request)
+    if auth_user is None:
+        return JsonResponse({"error": "Invalid token"}, status=401)
+
+    teams_obj = Team.objects.filter(user=auth_user)
+
+    if not teams_obj.exists():
+        return JsonResponse([], safe=False, status=200)
+
+    team_list = []
+    for team_obj in teams_obj:
+        team_members = TeamMember.objects.filter(team=team_obj).select_related('pokemon').order_by('slot')
+
+        team_members_list = []
+        for team_member in team_members:
+            if team_member.pokemon:
+                team_members_list.append({
+                    "slot": team_member.slot,
+                    "front_sprite": team_member.pokemon.front_sprite
+                })
+
+        team_list.append({
+            "team_id": team_obj.id,
+            "members": team_members_list
+        })
+
+    return JsonResponse(team_list, safe=False, status=200)
