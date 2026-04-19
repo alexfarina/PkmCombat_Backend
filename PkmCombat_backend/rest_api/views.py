@@ -381,3 +381,63 @@ def get_all_teams(request):
         })
 
     return JsonResponse(team_list, safe=False, status=200)
+
+
+def get_team(request, team_id):
+    if request.method!="GET":
+        return JsonResponse({"error": "HTTP method not supported"},status=405)
+    auth_user=__get_request_user(request)
+    if auth_user is None:
+        return JsonResponse({"error":"Invalid token"}, status=401)
+    try:
+        team_obj=Team.objects.get(id=team_id, user=auth_user)
+        team_members_obj = TeamMember.objects.filter(team=team_obj).select_related('pokemon', 'pokemon__pkm_stats').order_by('slot')
+        json_team = {"id": team_obj.id,
+                     "user": team_obj.user.id,
+                     "members":[]}
+        for team_member in team_members_obj:
+            pkm_obj = None
+            if team_member.pokemon:
+                pkm_moves = PkmMoves.objects.filter(pokemon=team_member.pokemon).select_related("move")
+
+                moves_list = []
+                for m in pkm_moves:
+                    moves_list.append({
+                        "name": m.move.name,
+                        "desc": m.move.desc,
+                        "type": m.move.type,
+                        "category":m.move.category,
+                        "power": m.move.power,
+                        "accuracy": m.move.accuracy,
+                        "priority": m.move.priority,
+                        "effect_type": m.move.effect_type,
+                        "effect_chance": m.move.effect_chance
+                    })
+
+                stats_obj = {
+                    "hp": team_member.pokemon.pkm_stats.hp,
+                    "def_esp": team_member.pokemon.pkm_stats.def_esp,
+                    "def_fis": team_member.pokemon.pkm_stats.def_fis,
+                    "att_esp": team_member.pokemon.pkm_stats.att_esp,
+                    "att_fis": team_member.pokemon.pkm_stats.att_fis,
+                    "speed": team_member.pokemon.pkm_stats.speed,
+                }
+                pkm_obj={
+                    "name": team_member.pokemon.name,
+                    "sound": team_member.pokemon.sound,
+                    "front_sprite": team_member.pokemon.front_sprite,
+                    "back_sprite": team_member.pokemon.back_sprite,
+                    "lvl": team_member.pokemon.lvl,
+                    "first_type": team_member.pokemon.first_type,
+                    "second_type": team_member.pokemon.second_type,
+                    "pkm_stats": stats_obj,
+                    "pkm_moves": moves_list
+                }
+
+            json_team.get("members").append({
+                "slot": team_member.slot,
+                "pokemon": pkm_obj
+            })
+        return JsonResponse(json_team,status=200)
+    except Team.DoesNotExist:
+        return JsonResponse({"error": "Team does not exist"}, status=404)
