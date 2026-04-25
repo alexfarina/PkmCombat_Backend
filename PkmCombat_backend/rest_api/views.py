@@ -81,9 +81,9 @@ def __get_request_user(request):
         except User.DoesNotExist:
             return  None
 
-
+@csrf_exempt
 def update_or_create_pokemon(request, team_id, slot):
-    if request.method!="GET":
+    if request.method!="POST":
         return JsonResponse({"error":"HTTP method unsupportable"}, status=405)
     auth_user = __get_request_user(request)
     if not auth_user:
@@ -179,19 +179,22 @@ def update_or_create_pokemon(request, team_id, slot):
                     pkm_stats=stats_obj
                 )
                 try:
-                    team=Team.objects.get(id=team_id,user=auth_user)
-                    team_members = TeamMember.objects.get(team=team.id, slot=slot)
-                    if team_members.pokemon:
-                        if team_members.pokemon.pkm_stats:
-                            team_members.pokemon.pkm_stats.delete()
-                        team_members.pokemon.delete()
-                    team_members.pokemon = bd_pkm
-                    team_members.save()
+                    team = Team.objects.get(id=team_id, user=auth_user)
+                    try:
+                        team_members = TeamMember.objects.get(team=team.id, slot=slot)
+                        if team_members.pokemon:
+                            if team_members.pokemon.pkm_stats:
+                                team_members.pokemon.pkm_stats.delete()
+                            team_members.pokemon.delete()
+                        team_members.pokemon = bd_pkm
+                        team_members.save()
+                    except TeamMember.DoesNotExist:
+                        TeamMember.objects.create(team=team, slot=slot, pokemon=bd_pkm)
+
                 except Team.DoesNotExist:
-                    team_created=Team.objects.create(user=auth_user)
+                    team_created = Team.objects.create(user=auth_user)
                     TeamMember.objects.create(team=team_created, slot=slot, pokemon=bd_pkm)
-                except TeamMember.DoesNotExist:
-                    return JsonResponse({"error": "Slot not found in this team"}, status=404)
+
                 return JsonResponse({"OK": "created"}, status=201)
             else:
                 return JsonResponse({"error": "Pokemon not found"}, status=404)
@@ -216,9 +219,9 @@ def apply_nature(nature, attack, defense, spe_att, spe_def, speed):
 
     return int(attack), int(defense), int(spe_att), int(spe_def), int(speed)
 
-
+@csrf_exempt
 def update_or_create_move(request, team_id , slot):
-    if request.method!="GET":
+    if request.method!="POST":
         return JsonResponse({"error":"HTTP method unsupportable"}, status=405)
 
     mov1_name = (request.GET.get("mov1") or "").lower().strip()
@@ -295,6 +298,8 @@ def update_or_create_move(request, team_id , slot):
                         "suggestion_mov3": suggestion_mov3,
                         "suggestion_mov4": suggestion_mov4
                     }, status=200)
+
+                PkmMoves.objects.filter(pokemon=team_member.pokemon).delete()
 
                 for requested_move in pkm_moves.values():
                     if requested_move:
@@ -441,3 +446,4 @@ def get_team(request, team_id):
         return JsonResponse(json_team,status=200)
     except Team.DoesNotExist:
         return JsonResponse({"error": "Team does not exist"}, status=404)
+
