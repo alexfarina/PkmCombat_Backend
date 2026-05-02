@@ -447,3 +447,26 @@ def get_team(request, team_id):
     except Team.DoesNotExist:
         return JsonResponse({"error": "Team does not exist"}, status=404)
 
+
+@csrf_exempt
+def accept_challenge(request, battle_id):
+    if request.method != "PUT":
+        return JsonResponse({"error": "Method not supported"}, status=405)
+    auth_user = __get_request_user(request)
+    if auth_user is None:
+        return JsonResponse({"error": "Invalid token"}, status=401)
+    try:
+        battle = Battle.objects.get(id=battle_id, opponent=auth_user)
+        if battle.status != "waiting":
+            return JsonResponse({"error": "Battle already started or finished"}, status=400)
+        battle.status = "in_progress"
+        battle.save()
+
+        TurnBattle.objects.get_or_create(
+            battle=battle,
+            current_turn=1,
+        )
+
+        return JsonResponse({"ok": "Battle started! Good luck"}, status=200)
+    except Battle.DoesNotExist:
+        return JsonResponse({"error": "Challenge not found"}, status=404)

@@ -28,4 +28,5 @@ urlpatterns = [
     path('delete_pkm_in_team/<int:team_id>/<int:slot_id>/', views.delete_pkm_in_team),
     path('get_all_teams/', views.get_all_teams),
     path('get_team/<int:team_id>/', views.get_team),
+    path('accept_challenge/<int:battle_id>/', views.accept_challenge)
 ]
