@@ -530,3 +530,37 @@ def get_my_challenges(request):
 
 
     return JsonResponse({"ok": challenge_list})
+
+def choose_first_pkm(request, slot, battle_id):
+    if request.method != "GET":
+        return JsonResponse({"error": "Method not supported"}, status=405)
+    auth_user = __get_request_user(request)
+    if auth_user is None:
+        return JsonResponse({"error": "Invalid token"}, status=401)
+    first_pkm_name = ""
+    try:
+        active_battle = Battle.objects.get(user=auth_user, id=battle_id, status="in_progress")
+        user_team_list = active_battle.user_team.get("members", [])
+        for pkm in user_team_list:
+            if pkm.get("slot") ==slot:
+                pkm["is_active"] = True
+                first_pkm_name = pkm.get("pokemon").get("name")
+            else:
+                pkm["is_active"] = False
+        active_battle.save()
+
+    except Battle.DoesNotExist:
+        try:
+            active_battle = Battle.objects.get(opponent=auth_user, id=battle_id, status="in_progress")
+            opponent_team_list = active_battle.opponent_team.get("members", [])
+            for pkm in opponent_team_list:
+                if pkm.get("slot") ==slot:
+                    pkm["is_active"] = True
+                    first_pkm_name=pkm.get("pokemon").get("name")
+                else:
+                    pkm["is_active"] = False
+            active_battle.save()
+        except Battle.DoesNotExist:
+            return JsonResponse({"error": "You are not currently participating in this battle"}, status=404)
+
+    return JsonResponse({"ok": f"You choose: {first_pkm_name}"}, status=200)

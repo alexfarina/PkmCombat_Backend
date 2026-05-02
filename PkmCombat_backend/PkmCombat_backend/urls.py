@@ -31,4 +31,5 @@ urlpatterns = [
     path('accept_challenge/<int:battle_id>/', views.accept_challenge),
     path('create_battle/<int:user_team_id>/<int:opponent_team_id>/', views.create_battle),
     path('get_my_challenges/', views.get_my_challenges),
+    path('choose_first_pkm/<int:slot>/<int:battle_id>/', views.choose_first_pkm),
 ]
