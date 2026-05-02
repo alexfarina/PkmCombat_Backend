@@ -510,3 +510,23 @@ def accept_challenge(request, battle_id):
         return JsonResponse({"ok": "Battle started! Good luck"}, status=200)
     except Battle.DoesNotExist:
         return JsonResponse({"error": "Challenge not found"}, status=404)
+
+@csrf_exempt
+def get_my_challenges(request):
+    if request.method != "GET":
+        return JsonResponse({"error": "Method not supported"}, status=405)
+    auth_user = __get_request_user(request)
+    if auth_user is None:
+        return JsonResponse({"error": "Invalid token"}, status=401)
+
+    challenge_list=[]
+    challenges=Battle.objects.filter(opponent=auth_user, status="waiting")
+    for battle in challenges:
+        challenge_list.append({
+            "battle_id": battle.id,
+            "challenger": battle.user.id,
+            "challenger_name": battle.user.name
+        })
+
+
+    return JsonResponse({"ok": challenge_list})

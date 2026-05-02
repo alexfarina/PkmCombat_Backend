@@ -28,9 +28,7 @@ urlpatterns = [
     path('delete_pkm_in_team/<int:team_id>/<int:slot_id>/', views.delete_pkm_in_team),
     path('get_all_teams/', views.get_all_teams),
     path('get_team/<int:team_id>/', views.get_team),
-<<<<<<< HEAD
-    path('accept_challenge/<int:battle_id>/', views.accept_challenge)
-=======
-    path('create_battle/<int:user_team_id>/<int:opponent_team_id>/', views.create_battle)
->>>>>>> 7d5fd3dbd63797b619350edb5fe0795b17b16884
+    path('accept_challenge/<int:battle_id>/', views.accept_challenge),
+    path('create_battle/<int:user_team_id>/<int:opponent_team_id>/', views.create_battle),
+    path('get_my_challenges/', views.get_my_challenges),
 ]
