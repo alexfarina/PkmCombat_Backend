@@ -448,6 +448,46 @@ def get_team(request, team_id):
         return JsonResponse({"error": "Team does not exist"}, status=404)
 
 
+
+@csrf_exempt
+def create_battle(request, user_team_id , opponent_team_id):
+    if request.method!="POST":
+        return JsonResponse({"error": "HTTP method not supported"}, status=405)
+    auth_user = __get_request_user(request)
+    if auth_user is None:
+        return JsonResponse({"error": "Invalid token"}, status=401)
+
+    request.method = 'GET'
+
+    res_user_team=get_team(request,user_team_id)
+    res_opponent_team=get_team(request,opponent_team_id)
+
+    request.method = 'POST'
+
+    user_team_data=json.loads(res_user_team.content)
+    opponent_team_data=json.loads(res_opponent_team.content)
+
+    if int(user_team_data.get("user")) != int(auth_user.id):
+        return JsonResponse({"error": "You cannot use a team that does not belong to you"}, status=403)
+
+    try:
+        opponent_id=opponent_team_data.get("user")
+        opponent = User.objects.get(id=opponent_id)
+    except User.DoesNotExist:
+        return JsonResponse({"error": "The opponent does not exists"}, status=404)
+
+    battle=Battle.objects.create(
+        user=auth_user,
+        opponent=opponent,
+        status="waiting",
+        winner=None,
+        user_team=user_team_data,
+        opponent_team=opponent_team_data
+    )
+
+    return JsonResponse({"ok":"Battle created", "battle_id": battle.id}, status=201)
+
+
 @csrf_exempt
 def accept_challenge(request, battle_id):
     if request.method != "PUT":
