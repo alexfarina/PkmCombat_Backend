@@ -986,4 +986,20 @@ def process_attack(move, attacker_pkm, defender_pkm,turn_msg):
         current_hp = defender_stats.get("current_hp", 0)
         defender_stats["current_hp"] = max(0, current_hp - damage)
 
+def get_turn_status(request, battle_id):
+    if request.method != "GET":
+        return JsonResponse({"error": "HTTP method unsupported"}, status=405)
+    # Check the current turn
+    # If “resolve” is already True, it means the second player has already moved
+    # and the server has already processed the battle.
+    turno = TurnBattle.objects.filter(battle_id=battle_id,resolve=True).order_by('-current_turn').first()
 
+    if turno.resolve:
+        return JsonResponse({
+            "turn_resolved": True,
+            "turn_msg": turno.turn_log,
+            "user_team": turno.battle.user_team,
+            "opponent_team": turno.battle.opponent_team
+        })
+    else:
+        return JsonResponse({"turn_resolved": False})
