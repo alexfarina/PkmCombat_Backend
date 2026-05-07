@@ -1,3 +1,6 @@
+import math
+import random
+
 import requests
 from django.shortcuts import render
 
@@ -7,7 +10,7 @@ import secrets
 import bcrypt
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
-from rest_api.constants import NATURES, POKEDEX_LIST
+from rest_api.constants import NATURES, POKEDEX_LIST, PRIORITY_MOVES, TYPE_CHART
 from rest_api.models import User,Team,Battle,Moves,PkmMoves,PkmStats,Pokemon , TeamMember , TurnBattle
 
 
@@ -303,18 +306,17 @@ def update_or_create_move(request, team_id , slot):
 
                 for requested_move in pkm_moves.values():
                     if requested_move:
-                            try:
-                                move_obj = Moves.objects.get(name=requested_move)
-                                pkm_move=PkmMoves.objects.filter(pokemon=team_member.pokemon, move=move_obj).first()
-                                if pkm_move:
-                                    pkm_move.pokemon=team_member.pokemon
-                                    pkm_move.move=move_obj
-                                    pkm_move.save()
-                                else:
-                                    PkmMoves.objects.create(pokemon=team_member.pokemon, move=move_obj)
-
-                            except Moves.DoesNotExist:
-                                return JsonResponse({"error": f"The movement {requested_move} does not exist in BD"},status=400)
+                        try:
+                            move_obj = Moves.objects.get(name=requested_move)
+                            pkm_move=PkmMoves.objects.filter(pokemon=team_member.pokemon, move=move_obj).first()
+                            if pkm_move:
+                                pkm_move.pokemon=team_member.pokemon
+                                pkm_move.move=move_obj
+                                pkm_move.save()
+                            else:
+                                PkmMoves.objects.create(pokemon=team_member.pokemon, move=move_obj)
+                        except Moves.DoesNotExist:
+                            return JsonResponse({"error": f"The movement {requested_move} does not exist in BD"},status=400)
         except requests.exceptions.RequestException as e:
             return JsonResponse({"error": "Connection error"}, status=500)
     except Team.DoesNotExist:
@@ -395,7 +397,7 @@ def get_team(request, team_id):
     if auth_user is None:
         return JsonResponse({"error":"Invalid token"}, status=401)
     try:
-        team_obj=Team.objects.get(id=team_id, user=auth_user)
+        team_obj = Team.objects.get(id=team_id)
         team_members_obj = TeamMember.objects.filter(team=team_obj).select_related('pokemon', 'pokemon__pkm_stats').order_by('slot')
         json_team = {"id": team_obj.id,
                      "user": team_obj.user.id,
@@ -421,13 +423,14 @@ def get_team(request, team_id):
 
                 stats_obj = {
                     "hp": team_member.pokemon.pkm_stats.hp,
+                    "current_hp": team_member.pokemon.pkm_stats.hp,
                     "def_esp": team_member.pokemon.pkm_stats.def_esp,
                     "def_fis": team_member.pokemon.pkm_stats.def_fis,
                     "att_esp": team_member.pokemon.pkm_stats.att_esp,
                     "att_fis": team_member.pokemon.pkm_stats.att_fis,
                     "speed": team_member.pokemon.pkm_stats.speed,
                 }
-                pkm_obj={
+                pkm_obj = {
                     "name": team_member.pokemon.name,
                     "sound": team_member.pokemon.sound,
                     "front_sprite": team_member.pokemon.front_sprite,
@@ -435,12 +438,16 @@ def get_team(request, team_id):
                     "lvl": team_member.pokemon.lvl,
                     "first_type": team_member.pokemon.first_type,
                     "second_type": team_member.pokemon.second_type,
+                    "status": team_member.pokemon.status,
+                    "status_count": team_member.pokemon.status_count,
+                    "volatile_status": [],
                     "pkm_stats": stats_obj,
                     "pkm_moves": moves_list
                 }
 
             json_team.get("members").append({
                 "slot": team_member.slot,
+                "is_active": False,
                 "pokemon": pkm_obj
             })
         return JsonResponse(json_team,status=200)
@@ -564,3 +571,419 @@ def choose_first_pkm(request, slot, battle_id):
             return JsonResponse({"error": "You are not currently participating in this battle"}, status=404)
 
     return JsonResponse({"ok": f"You choose: {first_pkm_name}"}, status=200)
+
+@csrf_exempt
+def choose_user_action(request, battle_id,action,action_value):
+    if request.method!="POST":
+        return  JsonResponse({"error":"HTTP method not supported"}, status=405)
+    auth_user=__get_request_user(request)
+    if auth_user is None:
+        return JsonResponse({"error": "Invalid token"}, status=401)
+    try:
+        try:
+            active_battle = Battle.objects.get(user=auth_user, id=battle_id, status="in_progress")
+        except Battle.DoesNotExist:
+            active_battle = Battle.objects.get(opponent=auth_user, id=battle_id, status="in_progress")
+
+        current_turn_obj = TurnBattle.objects.get(battle=active_battle, resolve=False)
+
+        if auth_user==active_battle.user:
+            current_turn_obj.user_act=action
+            current_turn_obj.user_act_value=action_value
+        elif auth_user==active_battle.opponent:
+            current_turn_obj.opponent_act = action
+            current_turn_obj.opp_act_value = action_value
+        current_turn_obj.save()
+
+        if current_turn_obj.user_act!="not_selected" and  current_turn_obj.opponent_act!="not_selected":
+            process_the_battle_turn(request,active_battle.id)
+            return JsonResponse({"ok": "Action received, turn resolving...", "resolved": True}, status=200)
+        else:
+            return JsonResponse({"ok": "Waiting for opponent","resolved": False}, status=200)
+    except (Battle.DoesNotExist, TurnBattle.DoesNotExist):
+        return JsonResponse({"error": "Either the battle or turn doesn't exist, or you're not a participant"}, status=404)
+
+
+def process_the_battle_turn(request, battle_id):
+    if request.method!="POST":
+        return JsonResponse({"error":"HTTP method not supported"}, status=405)
+    auth_user = __get_request_user(request)
+    if auth_user is None:
+        return JsonResponse({"error": "Invalid token"}, status=401)
+    turn_msg = []
+    try:
+        u_members_deaths_cont, o_members_deaths_cont = 0, 0
+        active_battle=Battle.objects.get(id=battle_id)
+        if active_battle.status=="waiting":
+            return  JsonResponse({"ok":"The battle is on hold"}, status=200)
+        elif active_battle.status=="in_progress":
+            try:
+                turn_battle = TurnBattle.objects.get(battle=active_battle, resolve=False)
+
+                #change turn
+                if turn_battle.user_act == "change_pkm":
+                    change_pkm(auth_user, turn_battle.user_act_value, active_battle,turn_msg)
+                if turn_battle.opponent_act == "change_pkm":
+                    change_pkm(active_battle.opponent, turn_battle.opp_act_value, active_battle,turn_msg)
+
+                #Calculate who attack first
+                user_team=active_battle.user_team.get("members", [])
+                opponent_team=active_battle.opponent_team.get("members", [])
+
+                u_has_prio = turn_battle.user_act_value in PRIORITY_MOVES
+                o_has_prio = turn_battle.opp_act_value in PRIORITY_MOVES
+
+                u_speed = get_active_u_speed(user_team) + (1000 if u_has_prio else 0)
+                o_speed = get_active_o_speed(opponent_team) + (1000 if o_has_prio else 0)
+
+                if u_speed> o_speed:
+                   if turn_battle.user_act=="attack":
+                        attack(auth_user, turn_battle.user_act_value, active_battle,turn_msg)
+                   if turn_battle.opponent_act=="attack" and get_active_o_hp(opponent_team)>0:
+                        attack(active_battle.opponent, turn_battle.opp_act_value, active_battle,turn_msg)
+                else:
+                    if turn_battle.opponent_act=="attack":
+                        attack(active_battle.opponent, turn_battle.opp_act_value, active_battle,turn_msg)
+                    if turn_battle.user_act=="attack" and get_active_u_hp(user_team)>0:
+                        attack(auth_user, turn_battle.user_act_value, active_battle,turn_msg)
+
+                active_battle.save()
+                turn_battle.resolve=True
+                turn_battle.turn_log = turn_msg
+                turn_battle.save()
+
+                if active_battle.status == "in_progress":
+                    next_turn_num = turn_battle.current_turn + 1
+
+                    TurnBattle.objects.get_or_create(
+                        battle=active_battle,
+                        current_turn=next_turn_num
+                    )
+
+                u_members = active_battle.user_team.get("members", [])
+                o_members = active_battle.opponent_team.get("members", [])
+
+                for u_member in u_members:
+                    u_member_stats=u_member.get("pokemon",{}).get("pkm_stats",{})
+                    if u_member_stats.get("current_hp")<=0:
+                        u_members_deaths_cont+=1
+
+                for o_member in o_members:
+                    o_member_stats=o_member.get("pokemon",{}).get("pkm_stats",{})
+                    if o_member_stats.get("current_hp")<=0:
+                        o_members_deaths_cont+=1
+
+                if u_members_deaths_cont==6:
+                    active_battle.winner=active_battle.opponent
+                    active_battle.status="finished"
+                    active_battle.save()
+                    return JsonResponse({"ok": "You dont have  more pokemons ,  you lost the battle"}, status=200)
+                if o_members_deaths_cont==6:
+                    active_battle.winner=active_battle.user
+                    active_battle.status = "finished"
+                    active_battle.save()
+                    return JsonResponse({"ok": "You defeated all your opponents' remaining Pokémon and won the battle"},status=200)
+
+                return JsonResponse({
+                    "ok": "Turn processed",
+                    "status": "in_progress",
+                    "user_team": active_battle.user_team,
+                    "opponent_team": active_battle.opponent_team,
+                    "turn_msg": turn_msg
+                }, status=200)
+            except TurnBattle.DoesNotExist:
+                return JsonResponse({"error": "An error has occurred in the battle"}, status=404)
+        elif active_battle.status == "finished":
+            return JsonResponse({"ok":"The battle is finished"}, status=200)
+    except Battle.DoesNotExist:
+        return JsonResponse({"error":"Battle does not exist"}, status=404)
+
+
+def get_active_u_speed(user_team):
+    for u_member in user_team:
+        if u_member.get("is_active"):
+            pokemon = u_member.get("pokemon", {})
+            stats = pokemon.get("pkm_stats", {})
+            if stats.get("current_hp", 0) <= 0:
+                return 0
+
+            speed = stats.get("speed", 0)
+            if pokemon.get("status") == "eff_par":
+                speed = speed // 2
+            return speed
+    return 0
+
+
+def get_active_o_speed(opponent_team):
+    for o_member in opponent_team:
+        if o_member.get("is_active"):
+            pokemon = o_member.get("pokemon", {})
+            stats = pokemon.get("pkm_stats", {})
+            if stats.get("current_hp", 0) <= 0:
+                return 0
+
+            speed = stats.get("speed", 0)
+            if pokemon.get("status") == "eff_par":
+                speed = speed // 2
+            return speed
+    return 0
+
+def get_active_u_hp(user_team):
+    for u_member in user_team:
+        if u_member.get("is_active"):
+            u_pkm_hp = u_member.get("pokemon", {}).get("pkm_stats", {}).get("hp")
+            return u_pkm_hp
+    return None
+
+
+def get_active_o_hp(opponent_team):
+    for o_member in opponent_team:
+        if o_member.get("is_active"):
+            o_pkm_hp = o_member.get("pokemon", {}).get("pkm_stats", {}).get("hp")
+            return o_pkm_hp
+    return None
+
+
+
+def change_pkm(user, value, active_battle,turn_msg):
+    if active_battle.user == user:
+        team_data = active_battle.user_team
+    elif active_battle.opponent == user:
+        team_data = active_battle.opponent_team
+    else:
+        return JsonResponse({"error": "You don't belong in this fight" },status=401)
+
+    if team_data:
+        members = team_data.get("members", [])
+
+        for member in members:
+            pkm_name=member.get("pokemon",{}).get("name","Unknown")
+            if member.get("slot") == value:
+                member["is_active"] = True
+                turn_msg.append(f"You switched to {pkm_name}")
+            else:
+                member["is_active"] = False
+        if active_battle.user == user:
+            active_battle.user_team = team_data
+        else:
+            active_battle.opponent_team = team_data
+        active_battle.save()
+    return None
+
+
+def attack(user, value, active_battle,turn_msg):
+    try:
+        move = Moves.objects.get(name=value)
+        user_team = active_battle.user_team.get("members", [])
+        opponent_team = active_battle.opponent_team.get("members", [])
+
+        pkm_user, pkm_opp = None, None
+
+        for member in user_team:
+            if member.get("is_active"):
+                pkm_user = member
+
+        for member in opponent_team:
+            if member.get("is_active"):
+                pkm_opp = member
+
+        if not pkm_user or not pkm_opp:
+            return None
+
+        if active_battle.user == user:
+            process_attack(move, pkm_user, pkm_opp,turn_msg)
+        elif active_battle.opponent == user:
+            process_attack(move, pkm_opp, pkm_user,turn_msg)
+
+
+        active_battle.user_team["members"] = user_team
+        active_battle.opponent_team["members"] = opponent_team
+
+        active_battle.save()
+
+    except Moves.DoesNotExist:
+        return JsonResponse(f"El movimiento {value} no existe en la base de datos.")
+
+
+
+def process_attack(move, attacker_pkm, defender_pkm,turn_msg):
+    category = move.category
+    mov_name=move.name
+    turn_msg.append(f"The pokemon used {mov_name}")
+    defender_stats = defender_pkm.get("pokemon").get("pkm_stats", {})
+    attacker_stats = attacker_pkm.get("pokemon").get("pkm_stats", {})
+    variation = random.uniform(0.85, 1.0)
+    damage = 0
+
+    ignored_effects = ["unique", "trap", "two_turn", "recharge", "bide", "ohko", "fixed_hp"]
+
+    if move.effect_type in ignored_effects:
+        turn_msg.append(f"The move {move.name} is not implemented yet!")
+        return
+
+    if "flinch" in attacker_pkm.get("volatile_status", []):
+        attacker_pkm["volatile_status"].remove("flinch")
+        turn_msg.append(f"¡{attacker_pkm['name']} is  flinched!")
+        return
+    current_status = attacker_pkm.get("status")
+    if current_status in ["eff_frz", "eff_slp"]:
+        if attacker_pkm.get("status_count", 0) == 0:
+            attacker_pkm["status_count"] = random.randint(2, 5) if current_status == "eff_frz" else random.randint(1, 3)
+            msg = "is frozen solid!" if current_status == "eff_frz" else "is fast asleep!"
+            turn_msg.append(f"{attacker_pkm['name']} {msg}")
+            return
+
+        attacker_pkm["status_count"] -= 1
+
+        if attacker_pkm["status_count"] <= 0:
+            attacker_pkm["status"] = "none"
+            msg = "thawed out!" if current_status == "eff_frz" else "woke up!"
+            turn_msg.append(f"{attacker_pkm['name']} {msg}")
+        else:
+            msg = "is frozen solid!" if current_status == "eff_frz" else "is fast asleep!"
+            turn_msg.append(f"{attacker_pkm['name']} {msg}")
+            return
+    if current_status=="eff_par":
+        chance=random.randint(1,100)
+        if chance<=25:
+            turn_msg.append(f"{attacker_pkm['name']} is paralyzed!")
+            return
+    if  current_status== "eff_con":
+        chance = random.randint(0, 100)
+        if chance<= 33:
+            self_damage = int(attacker_stats["hp"] * 0.10)
+            attacker_stats["current_hp"] = max(0, attacker_stats["current_hp"] - self_damage)
+            turn_msg.append(f"{attacker_pkm['name']} is confused, he hurt itself in its confusion!")
+            return
+
+    match category:
+        case "physical":
+            current_att = attacker_stats["att_fis"]
+            if attacker_pkm.get("status") == "eff_brn":
+                current_att *= 0.5
+            damage = ((move.power * current_att) / defender_stats["def_fis"]) * variation
+            if move.effect_type=="recoil":
+                self_damage = int(damage * 0.25)
+                attacker_stats["current_hp"] = max(0, attacker_stats["current_hp"] - self_damage)
+                turn_msg.append(f"{attacker_pkm['name']} was hit with recoil!")
+        case "special":
+            damage = ((move.power * attacker_stats["att_esp"]) / defender_stats["def_esp"]) * variation
+        case "status":
+            effect = move.effect_type
+            stat_change=move.stat_change_amount
+            blacklist = ["dream-eater", "sand-attack", "flash", "kinesis","double-team", "minimize", "smokescreen"]
+            if mov_name in blacklist:
+                turn_msg.append(f"The move {move.name} is not implemented yet!")
+                return
+
+            match effect:
+                case "flinch":
+                    if random.randint(1, 100) <= move.effect_chance:
+                        if "flinch" not in defender_pkm.get("volatile_status", []):
+                            volatile_status = defender_pkm.get("volatile_status")
+                            volatile_status.append("flinch")
+                case "eff_frz":
+                    if random.randint(1, 100) <= move.effect_chance:
+                        if defender_pkm.get("status") == "none":
+                            defender_pkm["status"] = "eff_frz"
+                            turn_msg.append(f"¡{defender_pkm.get('pokemon', {}).get('name')} has been frozen!")
+                case "eff_brn":
+                    if random.randint(1, 100) <= move.effect_chance:
+                        if defender_pkm.get("status") == "none":
+                            defender_pkm["status"] = "eff_brn"
+                            turn_msg.append(f"¡{defender_pkm.get('pokemon', {}).get('name')} has been burned!")
+                case "eff_slp":
+                    if random.randint(1, 100) <= move.effect_chance:
+                        if defender_pkm.get("status") == "none":
+                            defender_pkm["status"] = "eff_slp"
+                            turn_msg.append(f"¡{defender_pkm.get('pokemon', {}).get('name')} has been slept!")
+                case "eff_psn":
+                    if random.randint(1, 100) <= move.effect_chance:
+                        if defender_pkm.get("status") == "none":
+                            defender_pkm["status"] = "eff_psn"
+                            turn_msg.append(f"¡{defender_pkm.get('pokemon', {}).get('name')} has been poisoned!")
+                case "eff_con":
+                    if random.randint(1, 100) <= move.effect_chance:
+                        if defender_pkm.get("status") == "none":
+                            defender_pkm["status"] = "eff_con"
+                            turn_msg.append(f"¡{defender_pkm.get('pokemon', {}).get('name')} has been confused!")
+                case "eff_par":
+                    if random.randint(1, 100) <= move.effect_chance:
+                        if defender_pkm.get("status") == "none":
+                            defender_pkm["status"] = "eff_par"
+                            turn_msg.append(f"¡{defender_pkm.get('pokemon', {}).get('name')} has been paralyzed!")
+                case "multi_hit":
+                    if mov_name=="double-kick":
+                        hits=2
+                    else:
+                        hits = random.randint(2, 5)
+
+                    total_damage = 0
+                    for hit in range(hits):
+                        damage = ((move.power * attacker_stats["att_fis"]) / defender_stats["def_fis"]) * variation
+                        total_damage+=damage
+
+                    damage=total_damage
+                    turn_msg.append(f"{attacker_pkm['name']} hit {hits} times!")
+                case "healing":
+                    hp = attacker_pkm.get("hp")
+                    current_hp = attacker_pkm.get("current_hp")
+                    heal = math.floor(hp / 2)
+                    current_hp += heal
+                    if current_hp > hp: current_hp = hp
+                    attacker_pkm["current_hp"] = current_hp
+                case "mod_atq":
+                    if stat_change == 1:attacker_stats["att_fis"] = int(attacker_stats["att_fis"] * 1.5)
+                    elif stat_change >= 2:attacker_stats["att_fis"] = int(attacker_stats["att_fis"] * 2.0)
+                    elif stat_change == -1:defender_stats["att_fis"] = int(defender_stats["att_fis"] * 0.66)
+                    elif stat_change <= -2:defender_stats["att_fis"] = int(defender_stats["att_fis"] * 0.5)
+                case "mod_def":
+                    if stat_change == 1:attacker_stats["def_fis"] = int(attacker_stats["def_fis"] * 1.5)
+                    elif stat_change >= 2:attacker_stats["def_fis"] = int(attacker_stats["def_fis"] * 2.0)
+                    elif stat_change == -1:defender_stats["def_fis"] = int(defender_stats["def_fis"] * 0.66)
+                    elif stat_change <= -2:defender_stats["def_fis"] = int(defender_stats["def_fis"] * 0.5)
+                case "mod_spa":
+                    if stat_change == 1:attacker_stats["att_esp"] = int(attacker_stats["att_esp"] * 1.5)
+                    elif stat_change >= 2:attacker_stats["att_esp"] = int(attacker_stats["att_esp"] * 2.0)
+                    elif stat_change == -1:defender_stats["att_esp"] = int(defender_stats["att_esp"] * 0.66)
+                    elif stat_change <= -2:defender_stats["att_esp"] = int(defender_stats["att_esp"] * 0.5)
+                case "mod_spd":
+                    if stat_change == 1:attacker_stats["def_esp"] = int(attacker_stats["def_esp"] * 1.5)
+                    elif stat_change >= 2:attacker_stats["def_esp"] = int(attacker_stats["def_esp"] * 2.0)
+                    elif stat_change == -1:defender_stats["def_esp"] = int(defender_stats["def_esp"] * 0.66)
+                    elif stat_change <= -2:defender_stats["def_esp"] = int(defender_stats["def_esp"] * 0.5)
+                case "mod_vel":
+                    if stat_change == 1:attacker_stats["speed"] = int(attacker_stats["speed"] * 1.5)
+                    elif stat_change >= 2:attacker_stats["speed"] = int(attacker_stats["speed"] * 2.0)
+                    elif stat_change == -1:defender_stats["speed"] = int(defender_stats["speed"] * 0.66)
+                    elif stat_change <= -2:defender_stats["speed"] = int(defender_stats["speed"] * 0.5)
+
+    if  attacker_pkm.get("status")== "eff_brn":
+        burn_damage = int(attacker_stats["hp"] // 16)
+        attacker_stats["current_hp"] = max(0, attacker_stats["current_hp"] - max(1, burn_damage))
+
+    if attacker_pkm.get("status") == "eff_psn":
+        attacker_pkm["status_count"] = attacker_pkm.get("status_count", 0) + 1
+        poison_dmg = (attacker_stats["hp"] // 16) * attacker_pkm["status_count"]
+        poison_dmg = max(1, poison_dmg)
+        attacker_stats["current_hp"] = max(0, attacker_stats["current_hp"] - poison_dmg)
+        turn_msg.append(f"{attacker_pkm['name']} is hurt by poison!")
+
+    if damage > 0:
+        move_type = move.type
+        types = [defender_pkm.get("first_type"), defender_pkm.get("second_type")]
+
+        effectiveness = 1.0
+        for t in types:
+            if t and t != "none":
+                mult = TYPE_CHART.get(move_type, {}).get(t, 1.0)
+                effectiveness *= mult
+
+        attacker_types = [attacker_pkm.get("first_type"), attacker_pkm.get("second_type")]
+        stab = 1.5 if move_type in attacker_types else 1.0
+
+        damage = int(damage * effectiveness* stab)
+        current_hp = defender_stats.get("current_hp", 0)
+        defender_stats["current_hp"] = max(0, current_hp - damage)
+
+

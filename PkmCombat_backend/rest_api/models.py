@@ -20,6 +20,7 @@ class Moves(models.Model):
     priority = models.IntegerField(default=0)  #+1 , +2
     effect_type = models.CharField(max_length=50) #poisoned
     effect_chance = models.IntegerField(null=True, blank=True)
+    stat_change_amount = models.IntegerField(null=True, blank=True)
 
     def __str__(self):
         return self.name
@@ -42,8 +43,9 @@ class Pokemon(models.Model):
     lvl = models.IntegerField(default=1)
     first_type = models.CharField(max_length=150)
     second_type = models.CharField(max_length=150, blank=True, null=True)
+    status = models.CharField(max_length=20, default='none')
+    status_count = models.IntegerField(default=0)
     pkm_stats = models.ForeignKey('PkmStats', on_delete=models.CASCADE)
-
 
 class PkmMoves(models.Model):
     pokemon = models.ForeignKey('Pokemon', on_delete=models.CASCADE)
@@ -75,5 +77,6 @@ class TurnBattle(models.Model):
     opponent_act=models.CharField(max_length=20, choices=ACTIONS_CHOICES, default='not_selected')
     user_act_value = models.CharField(max_length=50, null=True, blank=True) # attack->"ice-punch"
     opp_act_value = models.CharField(max_length=50, null=True, blank=True) #  slot->"3"
+    turn_log = models.JSONField(default=list)
     battle=models.ForeignKey('Battle', on_delete=models.CASCADE)
     resolve=models.BooleanField(default=False)
