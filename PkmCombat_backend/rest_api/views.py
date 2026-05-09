@@ -647,18 +647,22 @@ def process_the_battle_turn(request, battle_id):
                     if turn_battle.user_act=="attack" and get_active_u_hp(user_team)>0:
                         attack(auth_user, turn_battle.user_act_value, active_battle,turn_msg)
 
-                active_battle.save()
-                turn_battle.resolve=True
-                turn_battle.turn_log = turn_msg
-                turn_battle.save()
+                u_hp = get_active_u_hp(user_team)
+                o_hp = get_active_o_hp(opponent_team)
 
-                if active_battle.status == "in_progress":
+                if u_hp > 0 and o_hp > 0:
                     next_turn_num = turn_battle.current_turn + 1
-
                     TurnBattle.objects.get_or_create(
                         battle=active_battle,
                         current_turn=next_turn_num
                     )
+                else:
+                    turn_msg.append("Esperando a que el entrenador elija un nuevo Pokémon...")
+
+                active_battle.save()
+                turn_battle.resolve=True
+                turn_battle.turn_log = turn_msg
+                turn_battle.save()
 
                 u_members = active_battle.user_team.get("members", [])
                 o_members = active_battle.opponent_team.get("members", [])
@@ -731,7 +735,7 @@ def get_active_o_speed(opponent_team):
 def get_active_u_hp(user_team):
     for u_member in user_team:
         if u_member.get("is_active"):
-            u_pkm_hp = u_member.get("pokemon", {}).get("pkm_stats", {}).get("hp")
+            u_pkm_hp = u_member.get("pokemon", {}).get("pkm_stats", {}).get("current_hp")
             return u_pkm_hp
     return None
 
@@ -739,7 +743,7 @@ def get_active_u_hp(user_team):
 def get_active_o_hp(opponent_team):
     for o_member in opponent_team:
         if o_member.get("is_active"):
-            o_pkm_hp = o_member.get("pokemon", {}).get("pkm_stats", {}).get("hp")
+            o_pkm_hp = o_member.get("pokemon", {}).get("pkm_stats", {}).get("current_hp")
             return o_pkm_hp
     return None
 
