@@ -45,9 +45,9 @@ def register(request):
     ).decode("utf8")
     radom_token= secrets.token_hex(10)
 
-    User.objects.create(name=json_name, email= json_email, encrypted_pass=salted_and_hashed_pass, token_sesion=radom_token)
+    db_user=User.objects.create(name=json_name, email= json_email, encrypted_pass=salted_and_hashed_pass, token_sesion=radom_token)
 
-    return JsonResponse({"registered": True, "token": radom_token}, status=201)
+    return JsonResponse({"registered": True, "token": radom_token, "id":db_user.id}, status=201)
 
 
 @csrf_exempt
@@ -71,7 +71,7 @@ def login(request):
         random_token=secrets.token_hex(10)
         db_user.token_sesion=random_token
         db_user.save()
-        return JsonResponse({"token":random_token, "user": db_user.name, "email": db_user.email}, status=200)
+        return JsonResponse({"token":random_token, "user": db_user.name, "email": db_user.email, "id":db_user.id}, status=200)
     return JsonResponse({"error":"Incorrect password"}, status=401)
 
 def __get_request_user(request):
@@ -456,30 +456,20 @@ def get_team(request, team_id):
 
 
 
-@csrf_exempt
-def create_battle(request, user_team_id , opponent_team_id):
+def create_battle(request, user_team_id , opponent_id):
     if request.method!="POST":
         return JsonResponse({"error": "HTTP method not supported"}, status=405)
     auth_user = __get_request_user(request)
     if auth_user is None:
         return JsonResponse({"error": "Invalid token"}, status=401)
 
-    request.method = 'GET'
-
     res_user_team=get_team(request,user_team_id)
-    res_opponent_team=get_team(request,opponent_team_id)
-
-    request.method = 'POST'
 
     user_team_data=json.loads(res_user_team.content)
-    opponent_team_data=json.loads(res_opponent_team.content)
 
-    if int(user_team_data.get("user")) != int(auth_user.id):
-        return JsonResponse({"error": "You cannot use a team that does not belong to you"}, status=403)
 
     try:
-        opponent_id=opponent_team_data.get("user")
-        opponent = User.objects.get(id=opponent_id)
+        opponent=User.objects.get(id=opponent_id)
     except User.DoesNotExist:
         return JsonResponse({"error": "The opponent does not exists"}, status=404)
 
@@ -489,23 +479,28 @@ def create_battle(request, user_team_id , opponent_team_id):
         status="waiting",
         winner=None,
         user_team=user_team_data,
-        opponent_team=opponent_team_data
+        opponent_team={}
     )
 
     return JsonResponse({"ok":"Battle created", "battle_id": battle.id}, status=201)
 
 
-@csrf_exempt
-def accept_challenge(request, battle_id):
+def accept_challenge(request, battle_id, opponent_team_id):
     if request.method != "PUT":
         return JsonResponse({"error": "Method not supported"}, status=405)
     auth_user = __get_request_user(request)
     if auth_user is None:
         return JsonResponse({"error": "Invalid token"}, status=401)
+
+    res_opponent_team = get_team(request,opponent_team_id)
+    opponent_team_data = json.loads(res_opponent_team.content)
+
     try:
         battle = Battle.objects.get(id=battle_id, opponent=auth_user)
+
         if battle.status != "waiting":
             return JsonResponse({"error": "Battle already started or finished"}, status=400)
+        battle.opponent_team=opponent_team_data
         battle.status = "in_progress"
         battle.save()
 
@@ -517,7 +512,6 @@ def accept_challenge(request, battle_id):
         return JsonResponse({"ok": "Battle started! Good luck"}, status=200)
     except Battle.DoesNotExist:
         return JsonResponse({"error": "Challenge not found"}, status=404)
-
 @csrf_exempt
 def get_my_challenges(request):
     if request.method != "GET":
@@ -657,7 +651,7 @@ def process_the_battle_turn(request, battle_id):
                         current_turn=next_turn_num
                     )
                 else:
-                    turn_msg.append("Esperando a que el entrenador elija un nuevo Pokémon...")
+                    turn_msg.append("Waiting for the trainer to choose a new Pokémon...")
 
                 active_battle.save()
                 turn_battle.resolve=True
@@ -1007,3 +1001,26 @@ def get_turn_status(request, battle_id):
         })
     else:
         return JsonResponse({"turn_resolved": False})
+
+def get_users(request):
+    if request.method != "GET":
+        return JsonResponse({"error": "HTTP method unsupported"}, status=405)
+
+    auth_user = __get_request_user(request)
+    if auth_user is None:
+        return JsonResponse({"error": "Invalid token"}, status=401)
+
+    users = User.objects.all().order_by("-id")[:6]
+
+    if not users:
+        return JsonResponse({"error": "No users are available"}, status=404)
+
+    users_list = []
+    for user in users:
+        users_list.append({
+            "id": user.id,
+            "username": user.name,
+            "status": user.online
+        })
+
+    return JsonResponse(users_list, safe=False, status=200)
