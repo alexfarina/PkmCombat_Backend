@@ -58,7 +58,7 @@ def login(request):
         body_json=json.loads(request.body)
 
         json_name=body_json["name"]
-        json_password=body_json["encrypted_pass"]
+        json_password=body_json["password"]
     except KeyError:
         return JsonResponse({"error":"Missing body json parameter"}, status=400)
 
@@ -103,6 +103,8 @@ def update_or_create_pokemon(request, team_id, slot):
                 suggestions_pkm.append(p)
 
     lvl = int(request.GET.get("lvl") or 50)
+    if lvl < 1 or lvl > 100:
+        return JsonResponse({"error": "Level must be between 1 and 100"}, status=400)
     nature = request.GET.get("nature", "serious").lower().strip()
     if not nature:
         nature = "serious"
@@ -124,6 +126,8 @@ def update_or_create_pokemon(request, team_id, slot):
     ev_def_esp = int(request.GET.get("ev_def_esp") or 0)
     ev_speed = int(request.GET.get("ev_speed") or 0)
 
+    if any(ev > 252 for ev in [ev_hp, ev_att, ev_att_esp, ev_def, ev_def_esp, ev_speed]):
+        return JsonResponse({"error": "No EV can exceed 252"}, status=400)
 
     if name:
         url= f"https://pokeapi.co/api/v2/pokemon/{name}"
@@ -177,6 +181,7 @@ def update_or_create_pokemon(request, team_id, slot):
                     front_sprite=front_sprite,
                     back_sprite=back_sprite,
                     lvl=lvl,
+                    nature=nature,
                     first_type=first_type,
                     second_type=second_type,
                     pkm_stats=stats_obj
@@ -300,7 +305,7 @@ def update_or_create_move(request, team_id , slot):
                         "suggestion_mov2": suggestion_mov2,
                         "suggestion_mov3": suggestion_mov3,
                         "suggestion_mov4": suggestion_mov4
-                    }, status=200)
+                    }, status=400)
 
                 PkmMoves.objects.filter(pokemon=team_member.pokemon).delete()
 
@@ -439,6 +444,7 @@ def get_team(request, team_id):
                     "first_type": team_member.pokemon.first_type,
                     "second_type": team_member.pokemon.second_type,
                     "status": team_member.pokemon.status,
+                    "nature": team_member.pokemon.nature,
                     "status_count": team_member.pokemon.status_count,
                     "volatile_status": [],
                     "pkm_stats": stats_obj,
@@ -529,8 +535,7 @@ def get_my_challenges(request):
             "challenger_name": battle.user.name
         })
 
-
-    return JsonResponse({"ok": challenge_list})
+    return JsonResponse(challenge_list,safe=False,status=200)
 
 def choose_first_pkm(request, slot, battle_id):
     if request.method != "GET":

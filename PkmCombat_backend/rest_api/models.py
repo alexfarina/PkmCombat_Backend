@@ -44,6 +44,7 @@ class Pokemon(models.Model):
     first_type = models.CharField(max_length=150)
     second_type = models.CharField(max_length=150, blank=True, null=True)
     status = models.CharField(max_length=20, default='none')
+    nature = models.CharField(max_length=20, default='hardy')
     status_count = models.IntegerField(default=0)
     pkm_stats = models.ForeignKey('PkmStats', on_delete=models.CASCADE)
 
