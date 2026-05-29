@@ -34,5 +34,9 @@ urlpatterns = [
     path('choose_first_pkm/<int:slot>/<int:battle_id>/', views.choose_first_pkm),
     path('choose_user_action/<int:battle_id>/<action>/<action_value>/', views.choose_user_action),
     path('get_turn_status/<int:battle_d>/', views.get_turn_status),
-    path('get_users/', views.get_users)
+    path('reject_challenge/', views.reject_challenge),
+    path('get_users/', views.get_users),
+    path('get_natures/', views.get_natures),
+    path('get_pokedex/', views.get_pokedex),
+    path('get_moves/<pokemon>/', views.get_moves),
 ]

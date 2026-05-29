@@ -33,6 +33,12 @@ class PkmStats(models.Model):
     att_esp = models.IntegerField(null=True, blank=True)
     att_fis = models.IntegerField(null=True, blank=True)
     speed = models.IntegerField(null=True, blank=True)
+    ev_hp = models.IntegerField(default=0)
+    ev_att = models.IntegerField(default=0)
+    ev_att_esp = models.IntegerField(default=0)
+    ev_def = models.IntegerField(default=0)
+    ev_def_esp = models.IntegerField(default=0)
+    ev_speed = models.IntegerField(default=0)
 
 
 class Pokemon(models.Model):

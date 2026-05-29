@@ -173,7 +173,9 @@ def update_or_create_pokemon(request, team_id, slot):
 
                 stats_obj = PkmStats.objects.create(
                     hp=hp, att_fis=attack, def_fis=defense,
-                    att_esp=spe_att, def_esp=spe_def, speed=speed
+                    att_esp=spe_att, def_esp=spe_def, speed=speed,
+                    ev_hp=ev_hp, ev_att=ev_att, ev_att_esp=ev_att_esp,
+                    ev_def=ev_def, ev_def_esp=ev_def_esp, ev_speed=ev_speed
                 )
                 bd_pkm = Pokemon.objects.create(
                     name=name,
@@ -434,6 +436,12 @@ def get_team(request, team_id):
                     "att_esp": team_member.pokemon.pkm_stats.att_esp,
                     "att_fis": team_member.pokemon.pkm_stats.att_fis,
                     "speed": team_member.pokemon.pkm_stats.speed,
+                    "ev_hp": team_member.pokemon.pkm_stats.ev_hp,
+                    "ev_att": team_member.pokemon.pkm_stats.ev_att,
+                    "ev_att_esp": team_member.pokemon.pkm_stats.ev_att_esp,
+                    "ev_def": team_member.pokemon.pkm_stats.ev_def,
+                    "ev_def_esp": team_member.pokemon.pkm_stats.ev_def_esp,
+                    "ev_speed": team_member.pokemon.pkm_stats.ev_speed,
                 }
                 pkm_obj = {
                     "name": team_member.pokemon.name,
@@ -1029,3 +1037,53 @@ def get_users(request):
         })
 
     return JsonResponse(users_list, safe=False, status=200)
+
+
+def reject_challenge(request, battle_id):
+    if request.method != "PUT":
+        return JsonResponse({"error": "Method not supported"}, status=405)
+    auth_user = __get_request_user(request)
+    if auth_user is None:
+        return JsonResponse({"error": "Invalid token"}, status=401)
+
+    try:
+        battle = Battle.objects.get(id=battle_id, opponent=auth_user)
+
+        if battle.status != "waiting":
+            return JsonResponse({"error": "Battle already started or finished"}, status=400)
+        battle.status = "finished"
+        battle.save()
+
+        return JsonResponse({"ok": "Battle finished!"}, status=200)
+    except Battle.DoesNotExist:
+        return JsonResponse({"error": "Challenge not found"}, status=404)
+
+
+def get_moves(request, pokemon):
+    if request.method!="GET":
+        return JsonResponse({"error": "Method not supported"},status=405)
+
+    url = f"https://pokeapi.co/api/v2/pokemon/{pokemon}"
+    res=requests.get(url)
+
+    if res.status_code == 404:
+        return JsonResponse({"error": "Pokemon not found"}, status=404)
+
+    data=res.json()
+    moves=data.get("moves")
+    moves_list=[]
+    for move in moves:
+        moves_list.append(move["move"]["name"])
+    return  JsonResponse(moves_list,safe=False,status=200)
+
+
+def get_pokedex(request):
+    if request.method!="GET":
+        return JsonResponse({"error": "Method not supported"})
+    return JsonResponse(POKEDEX_LIST,safe=False,status=200)
+
+def get_natures(request):
+    if request.method!="GET":
+        return JsonResponse({"error": "Method not supported"})
+    natures_list = list(NATURES.keys())
+    return JsonResponse(natures_list,safe=False,status=200)
