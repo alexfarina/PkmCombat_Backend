@@ -92,32 +92,15 @@ def update_or_create_pokemon(request, team_id, slot):
     if not auth_user:
         return JsonResponse({"error": "Unauthorized"}, status=401)
     name = (request.GET.get("name") or "").lower().strip()
-    suggestions_pkm = []
-    suggestions_natures = []
-
-    if not name:
-        return JsonResponse({"error":"You must enter a name"}, status=400)
     if name not in POKEDEX_LIST:
-        for p in POKEDEX_LIST:
-            if p.startswith(name):
-                suggestions_pkm.append(p)
+        return JsonResponse({"error": "Pokemon not found"}, status=400)
 
     lvl = int(request.GET.get("lvl") or 50)
     if lvl < 1 or lvl > 100:
         return JsonResponse({"error": "Level must be between 1 and 100"}, status=400)
     nature = request.GET.get("nature", "serious").lower().strip()
-    if not nature:
-        nature = "serious"
     if nature not in NATURES:
-        for n in NATURES.keys():
-            if n.startswith(nature):
-                suggestions_natures.append(n)
-
-    if name not in POKEDEX_LIST or nature not in NATURES:
-        return JsonResponse({
-            "suggestions_pkm": suggestions_pkm,
-            "suggestions_natures": suggestions_natures
-        }, status=200)
+        return JsonResponse({"error": "Nature not found"}, status=400)
 
     ev_hp = int(request.GET.get("ev_hp") or 0)
     ev_att = int(request.GET.get("ev_att") or 0)
@@ -258,56 +241,17 @@ def update_or_create_move(request, team_id , slot):
             response = requests.get(url)
             if response.status_code == 200:
                 data = response.json()
-                learned_moves=[]
-                pkm_moves={"mov1": None,
-                           "mov2": None,
-                           "mov3": None,
-                           "mov4": None}
+                learned_moves = []
                 moves = data.get("moves", [])
                 for move in moves:
-                    move.get("move",{}).get("name")
                     learned_moves.append(move.get("move").get("name"))
 
-                suggestion_mov1 = []
-                suggestion_mov2 = []
-                suggestion_mov3 = []
-                suggestion_mov4 = []
-
-                if mov1_name in learned_moves:
-                    pkm_moves["mov1"] = mov1_name
-                elif mov1_name:
-                    for l in learned_moves:
-                        if l.startswith(mov1_name):
-                            suggestion_mov1.append(l)
-
-                if mov2_name in learned_moves:
-                    pkm_moves["mov2"] = mov2_name
-                elif mov2_name:
-                    for l in learned_moves:
-                        if l.startswith(mov2_name):
-                            suggestion_mov2.append(l)
-
-                if mov3_name in learned_moves:
-                    pkm_moves["mov3"] = mov3_name
-                elif mov3_name:
-                    for l in learned_moves:
-                        if l.startswith(mov3_name):
-                            suggestion_mov3.append(l)
-
-                if mov4_name in learned_moves:
-                    pkm_moves["mov4"] = mov4_name
-                elif mov4_name:
-                    for l in learned_moves:
-                        if l.startswith(mov4_name):
-                            suggestion_mov4.append(l)
-
-                if suggestion_mov1 or suggestion_mov2 or suggestion_mov3 or suggestion_mov4:
-                    return JsonResponse({
-                        "suggestion_mov1": suggestion_mov1,
-                        "suggestion_mov2": suggestion_mov2,
-                        "suggestion_mov3": suggestion_mov3,
-                        "suggestion_mov4": suggestion_mov4
-                    }, status=400)
+                pkm_moves = {
+                    "mov1": mov1_name if mov1_name in learned_moves else None,
+                    "mov2": mov2_name if mov2_name in learned_moves else None,
+                    "mov3": mov3_name if mov3_name in learned_moves else None,
+                    "mov4": mov4_name if mov4_name in learned_moves else None,
+                }
 
                 PkmMoves.objects.filter(pokemon=team_member.pokemon).delete()
 
@@ -315,13 +259,7 @@ def update_or_create_move(request, team_id , slot):
                     if requested_move:
                         try:
                             move_obj = Moves.objects.get(name=requested_move)
-                            pkm_move=PkmMoves.objects.filter(pokemon=team_member.pokemon, move=move_obj).first()
-                            if pkm_move:
-                                pkm_move.pokemon=team_member.pokemon
-                                pkm_move.move=move_obj
-                                pkm_move.save()
-                            else:
-                                PkmMoves.objects.create(pokemon=team_member.pokemon, move=move_obj)
+                            PkmMoves.objects.create(pokemon=team_member.pokemon, move=move_obj)
                         except Moves.DoesNotExist:
                             return JsonResponse({"error": f"The movement {requested_move} does not exist in BD"},status=400)
         except requests.exceptions.RequestException as e:
@@ -469,7 +407,7 @@ def get_team(request, team_id):
         return JsonResponse({"error": "Team does not exist"}, status=404)
 
 
-
+@csrf_exempt
 def create_battle(request, user_team_id , opponent_id):
     if request.method!="POST":
         return JsonResponse({"error": "HTTP method not supported"}, status=405)
@@ -481,11 +419,13 @@ def create_battle(request, user_team_id , opponent_id):
 
     user_team_data=json.loads(res_user_team.content)
 
-
     try:
         opponent=User.objects.get(id=opponent_id)
     except User.DoesNotExist:
         return JsonResponse({"error": "The opponent does not exists"}, status=404)
+
+    if Battle.objects.filter(user=auth_user, opponent=opponent, status="waiting").exists():
+        return JsonResponse({"error": "Battle already exists"}, status=400)
 
     battle=Battle.objects.create(
         user=auth_user,
@@ -498,7 +438,7 @@ def create_battle(request, user_team_id , opponent_id):
 
     return JsonResponse({"ok":"Battle created", "battle_id": battle.id}, status=201)
 
-
+@csrf_exempt
 def accept_challenge(request, battle_id, opponent_team_id):
     if request.method != "PUT":
         return JsonResponse({"error": "Method not supported"}, status=405)
@@ -526,6 +466,7 @@ def accept_challenge(request, battle_id, opponent_team_id):
         return JsonResponse({"ok": "Battle started! Good luck"}, status=200)
     except Battle.DoesNotExist:
         return JsonResponse({"error": "Challenge not found"}, status=404)
+
 @csrf_exempt
 def get_my_challenges(request):
     if request.method != "GET":
@@ -1038,7 +979,7 @@ def get_users(request):
 
     return JsonResponse(users_list, safe=False, status=200)
 
-
+@csrf_exempt
 def reject_challenge(request, battle_id):
     if request.method != "PUT":
         return JsonResponse({"error": "Method not supported"}, status=405)
@@ -1087,3 +1028,21 @@ def get_natures(request):
         return JsonResponse({"error": "Method not supported"})
     natures_list = list(NATURES.keys())
     return JsonResponse(natures_list,safe=False,status=200)
+
+
+def get_user(request):
+    if request.method != "GET":
+        return JsonResponse({"error": "Method not supported"}, status=405)
+    auth_user = __get_request_user(request)
+    if auth_user is None:
+        return JsonResponse({"error": "Invalid token"}, status=401)
+
+    username = request.GET.get("user")
+    if not username:
+        return JsonResponse({"error": "Username required"}, status=400)
+
+    try:
+        user = User.objects.get(name=username)
+        return JsonResponse({"id": user.id,"username": user.name,"status": user.online}, status=200)
+    except User.DoesNotExist:
+        return JsonResponse({"error": "User not found"}, status=404)
