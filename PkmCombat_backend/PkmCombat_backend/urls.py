@@ -33,7 +33,7 @@ urlpatterns = [
     path('get_my_challenges/', views.get_my_challenges),
     path('choose_first_pkm/<int:slot>/<int:battle_id>/', views.choose_first_pkm),
     path('choose_user_action/<int:battle_id>/<action>/<action_value>/', views.choose_user_action),
-    path('get_turn_status/<int:battle_d>/', views.get_turn_status),
+    path('get_turn_status/<int:battle_id>/', views.get_turn_status),
     path('reject_challenge/<int:battle_id>/', views.reject_challenge),
     path('get_users/', views.get_users),
     path('get_natures/', views.get_natures),
